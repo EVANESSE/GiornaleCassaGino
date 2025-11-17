@@ -167,8 +167,18 @@
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, collection, query, onSnapshot, addDoc, updateDoc, deleteDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Le variabili __firebase_config, __app_id e __initial_auth_token 
-        // vengono iniettate automaticamente dall'ambiente.
+        // CONFIGURAZIONE FIREBASE FORNITA DALL'UTENTE
+        const firebaseConfig = {
+          apiKey: "AIzaSyDqRAWYaoEQvpo9Eh0QfS351AdNuxse7kI",
+          authDomain: "giornalecassagino.firebaseapp.com",
+          projectId: "giornalecassagino",
+          storageBucket: "giornalecassagino.firebasestorage.app",
+          messagingSenderId: "792465698914",
+          appId: "1:792465698914:web:57c4ae252e24abde5aa13b"
+        };
+
+        // Le variabili __app_id e __initial_auth_token 
+        // vengono iniettate automaticamente dall'ambiente (se presenti).
         
         document.addEventListener('DOMContentLoaded', () => {
             const loadingOverlay = document.getElementById('loading-overlay');
@@ -205,7 +215,9 @@
                 async initFirebase() {
                     try {
                         // Carica la configurazione fornita dall'ambiente
-                        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+                        // RIMOSSO: const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+                        
+                        // USA LA CONFIGURAZIONE DEFINITA SOPRA
                         const fbApp = initializeApp(firebaseConfig);
                         this.stato.db = getFirestore(fbApp);
                         this.stato.auth = getAuth(fbApp);
