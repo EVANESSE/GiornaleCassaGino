@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Giornale Cassa Allianz (Firebase)</title>
+    <title>Giornale Cassa Allianz (Firestore)</title>
+    
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
     <style>
         :root {
             --colore-primario: #005f73; --colore-secondario: #0a9396; --colore-sfondo: #f8f9fa;
@@ -18,6 +22,7 @@
             max-width: 1300px; margin: auto; background-color: var(--colore-container);
             padding: 25px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
         }
+        /* ... (Il resto del CSS è identico a quello fornito) ... */
         h1 {
             text-align: center; font-size: 2.5em; padding: 15px; border-radius: 8px; color: white;
             background: linear-gradient(145deg, #495057, #212529); text-shadow: 1px 1px 3px rgba(0,0,0,0.5);
@@ -61,16 +66,6 @@
         }
         .icon-btn:hover { background-color: #e9ecef; }
         
-        /* Overlay per il caricamento */
-        #loading-overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background-color: rgba(255, 255, 255, 0.8);
-            display: flex; justify-content: center; align-items: center;
-            font-size: 1.2em; font-weight: bold; z-index: 1000;
-            flex-direction: column; gap: 15px;
-            color: var(--colore-primario);
-        }
-        
         @media print {
             @page { size: A4 portrait; margin: 2cm; }
             body { font-size: 10pt; color: #000; }
@@ -87,13 +82,6 @@
     </style>
 </head>
 <body>
-    <div id="loading-overlay">
-        <svg aria-hidden="true" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-        </svg>
-        <span>Caricamento e connessione a Firebase...</span>
-    </div>
-
     <div class="print-only">
         <div id="print-header-content"></div>
         <div id="print-table-content"></div>
@@ -101,7 +89,7 @@
     </div>
 
     <div class="container">
-        <h1>Giornale Cassa Allianz (Firebase)</h1>
+        <h1>Giornale Cassa Allianz Gino (Firestore)</h1>
         
         <div class="controls">
             <div>
@@ -145,29 +133,16 @@
             <div class="total-display">Totale Cassa (Contanti e Assegni): € <span id="totale-cassa">0.00</span></div>
         </div>
 
-        <!-- Sezione Backup nascosta, gestita da Firebase -->
-        <h2 class="section-title" style="display: none;">Backup e Ripristino</h2>
-        <div class="backup-section" style="display: none;">
-            <button id="backup-btn" class="secondary-action">Backup / Esporta Dati</button>
-            <div>
-                 <label for="restore-input" class="button-like secondary-action">Importa Dati da Backup</label>
-                 <input type="file" id="restore-input" accept=".json" style="display: none;">
-            </div>
+        <h2 class="section-title">Database</h2>
+        <div class="backup-section" style="justify-content: center;">
+            <p>I dati sono salvati automaticamente e in tempo reale su Firebase Firestore.</p>
         </div>
     </div>
 
-    <!-- 
-      IMPORTAZIONE DEI MODULI FIREBASE
-      Questi script caricano le funzionalità di Firebase necessarie.
-      Usiamo "type=module" per la sintassi moderna di importazione.
-    -->
-    <script type="module">
-        // Importa le funzioni di Firebase necessarie
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, collection, query, onSnapshot, addDoc, updateDoc, deleteDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
 
-        // CONFIGURAZIONE FIREBASE FORNITA DALL'UTENTE
+        // --- 1. INIZIALIZZAZIONE FIREBASE ---
         const firebaseConfig = {
           apiKey: "AIzaSyDqRAWYaoEQvpo9Eh0QfS351AdNuxse7kI",
           authDomain: "giornalecassagino.firebaseapp.com",
@@ -177,365 +152,417 @@
           appId: "1:792465698914:web:57c4ae252e24abde5aa13b"
         };
 
-        // Le variabili __app_id e __initial_auth_token 
-        // vengono iniettate automaticamente dall'ambiente (se presenti).
+        // Inizializza Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const giornaliCollection = db.collection('giornali');
         
-        document.addEventListener('DOMContentLoaded', () => {
-            const loadingOverlay = document.getElementById('loading-overlay');
+        // --- FINE INIZIALIZZAZIONE ---
+
+        const app = {
+            // 'data' ora funge da cache locale dei dati di Firestore
+            data: { giornali: [] },
+            stato: { giornaleApertoId: null, giornaleVisualizzatoId: null, idInModifica: null },
             
-            const app = {
-                data: { giornali: [] },
-                stato: {
-                    giornaleApertoId: null,
-                    giornaleVisualizzatoId: null,
-                    idInModifica: null,
-                    // Stato di Firebase
-                    db: null,
-                    auth: null,
-                    userId: null,
-                    isAuthReady: false,
-                    collectionRef: null // Riferimento alla collezione Firestore
-                },
-                
-                async init() {
-                    // 1. Inizializza Firebase
-                    await this.initFirebase();
-                    // 2. Aggiungi gli event listener (pulsanti, form, ecc.)
+            // init() deve essere ASINCRONO per attendere il caricamento da Firestore
+            async init() {
+                try {
+                    await this.loadData(); // Attende il caricamento dei dati
                     this.addEventListeners();
-                    // 3. setupDataListener() viene chiamato da initFirebase quando l'auth è pronta
-                    //    e onSnapshot() in setupDataListener chiamerà render()
-                },
-
-                // --- NUOVA LOGICA FIREBASE ---
-                
-                /**
-                 * Inizializza Firebase, gestisce l'autenticazione e imposta
-                 * il listener per i dati non appena l'utente è autenticato.
-                 */
-                async initFirebase() {
-                    try {
-                        // Carica la configurazione fornita dall'ambiente
-                        // RIMOSSO: const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-                        
-                        // USA LA CONFIGURAZIONE DEFINITA SOPRA
-                        const fbApp = initializeApp(firebaseConfig);
-                        this.stato.db = getFirestore(fbApp);
-                        this.stato.auth = getAuth(fbApp);
-                        
-                        // Abilita i log di debug di Firestore
-                        setLogLevel('Debug');
-
-                        // Ascolta i cambiamenti dello stato di autenticazione
-                        onAuthStateChanged(this.stato.auth, async (user) => {
-                            if (user) {
-                                // Utente già autenticato (o appena autenticato)
-                                this.stato.userId = user.uid;
-                                this.stato.isAuthReady = true;
-                                console.log("Utente autenticato (ID):", this.stato.userId);
-                                
-                                // Ora che abbiamo un utente, impostiamo il listener
-                                this.setupDataListener(); 
-                            } else {
-                                // Nessun utente, esegui l'accesso
-                                console.log("Nessun utente, avvio accesso...");
-                                try {
-                                    // Prova prima con il token personalizzato (se fornito)
-                                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                                        await signInWithCustomToken(this.stato.auth, __initial_auth_token);
-                                    } else {
-                                        // Altrimenti, usa l'accesso anonimo
-                                        await signInAnonymously(this.stato.auth);
-                                    }
-                                    // onAuthStateChanged verrà chiamato di nuovo dopo l'accesso
-                                } catch (authError) {
-                                    console.error("Errore durante l'accesso:", authError);
-                                    loadingOverlay.textContent = "Errore di autenticazione. Ricarica la pagina.";
-                                }
-                            }
-                        });
-
-                    } catch (e) {
-                        console.error("Errore fatale nell'inizializzazione di Firebase:", e);
-                        loadingOverlay.textContent = "Impossibile caricare Firebase. Ricarica la pagina.";
-                    }
-                },
-
-                /**
-                 * Imposta il listener onSnapshot di Firestore.
-                 * Questa funzione sostituisce il vecchio loadData().
-                 * Viene chiamata solo DOPO che l'autenticazione è riuscita.
-                 */
-                setupDataListener() {
-                    if (!this.stato.isAuthReady || !this.stato.userId) {
-                        console.error("Autenticazione non pronta, impossibile impostare il listener.");
-                        return;
-                    }
-                    
-                    // Costruisci il percorso sicuro e privato per i dati dell'utente
-                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                    const collectionPath = \`/artifacts/${appId}/users/${this.stato.userId}/giornali\`;
-                    
-                    this.stato.collectionRef = collection(this.stato.db, collectionPath);
-                    console.log("Ascolto la collezione:", collectionPath);
-                    
-                    const q = query(this.stato.collectionRef);
-                    
-                    // onSnapshot ascolta le modifiche in tempo reale
-                    onSnapshot(q, (querySnapshot) => {
-                        console.log("Dati ricevuti da Firestore.");
-                        // Converte i documenti in un array di dati, aggiungendo l'ID
-                        this.data.giornali = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                        
-                        // Aggiorna lo stato per il giornale aperto
-                        const giornaleAperto = this.data.giornali.find(g => g.stato === 'aperto');
-                        if (giornaleAperto) {
-                            this.stato.giornaleApertoId = giornaleAperto.id;
-                            if (!this.stato.giornaleVisualizzatoId || this.data.giornali.find(g => g.id === this.stato.giornaleVisualizzatoId)?.stato !== 'aperto') {
-                                this.stato.giornaleVisualizzatoId = giornaleAperto.id;
-                            }
-                        } else {
-                            this.stato.giornaleApertoId = null;
-                        }
-                        
-                        // Se il giornale che stavamo guardando è stato eliminato, resetta la vista
-                        if (this.stato.giornaleVisualizzatoId && !this.data.giornali.find(g => g.id === this.stato.giornaleVisualizzatoId)) {
-                             this.stato.giornaleVisualizzatoId = this.stato.giornaleApertoId; // Torna a quello aperto o null
-                        }
-
-                        // Chiama render() per aggiornare l'interfaccia con i nuovi dati
-                        this.render(); 
-                        
-                        // Nasconde l'overlay di caricamento
-                        loadingOverlay.style.display = 'none';
-                    }, (error) => {
-                        console.error("Errore durante l'ascolto di Firestore:", error);
-                        loadingOverlay.textContent = "Errore di connessione al database.";
-                    });
-                },
-
-                // --- FUNZIONI DI RENDER (INVARIATE) ---
-                render() { const giornaleVisualizzato = this.data.giornali.find(g => g.id === this.stato.giornaleVisualizzatoId); this.renderUI(giornaleVisualizzato); this.renderDropdown(); this.renderTabella(giornaleVisualizzato); this.renderTotale(giornaleVisualizzato); },
-                renderUI(giornale) { const mainView = document.getElementById('main-view'), noOpenJournalView = document.getElementById('no-open-journal-view'), form = document.getElementById('movimento-form'), openJournalActions = document.getElementById('open-journal-actions'), closedJournalActions = document.getElementById('closed-journal-actions'), titoloGiornale = document.getElementById('titolo-giornale'); mainView.style.display = 'none'; noOpenJournalView.style.display = 'none'; form.style.display = 'none'; openJournalActions.style.display = 'none'; closedJournalActions.style.display = 'none'; if (!this.stato.giornaleApertoId && !giornale) { noOpenJournalView.style.display = 'flex'; } else { mainView.style.display = 'block'; if (giornale && giornale.stato === 'aperto') { titoloGiornale.textContent = 'Giornale Cassa Attuale (Aperto)'; form.style.display = 'grid'; openJournalActions.style.display = 'flex'; } else if (giornale) { titoloGiornale.textContent = `Riepilogo Giornale N. ${giornale.numero || 'N/A'}/${giornale.anno || 'N/A'} (Chiuso il ${giornale.dataChiusura})`; closedJournalActions.style.display = 'flex'; } } },
-                renderDropdown() { const select = document.getElementById('giornali-salvati'); select.innerHTML = '<option value="">Seleziona per consultare...</option>'; this.data.giornali.filter(g => g.stato === 'chiuso').sort((a, b) => (b.anno - a.anno) || (b.numero - a.numero)).forEach(g => { const option = document.createElement('option'); option.value = g.id; option.textContent = `N. ${g.numero || 'N/A'}/${g.anno || 'N/A'} - Chiuso il ${g.dataChiusura}`; select.appendChild(option); }); select.value = (this.stato.giornaleVisualizzatoId !== this.stato.giornaleApertoId) ? this.stato.giornaleVisualizzatoId : ""; },
-                renderTabella(giornale) {
-                    const tbody = document.getElementById('tabella-movimenti');
-                    tbody.innerHTML = '';
-                    if (!giornale) return;
-                    // Ordina i movimenti per ID (data di creazione)
-                    const movimentiOrdinati = giornale.movimenti.sort((a, b) => a.id - b.id);
-                    movimentiOrdinati.forEach(m => {
-                        const row = tbody.insertRow();
-                        const actionsHTML = giornale.stato === 'aperto'
-                            ? `<button class="icon-btn edit-btn" title="Modifica movimento" data-id="${m.id}">✏️</button>
-                               <button class="icon-btn delete-btn" title="Elimina movimento" data-id="${m.id}">❌</button>`
-                            : '—';
-                        
-                        row.innerHTML = `<td>${m.ramo}</td><td>${m.numeroPolizza}</td><td>${m.tipo}</td><td>${m.pagamento}</td><td>${new Date(m.data).toLocaleDateString('it-IT')}</td><td>${m.cliente}</td><td>${m.importo.toFixed(2).replace('.',',')} €</td><td class="no-print">${actionsHTML}</td>`;
-                    });
-                },
-                renderTotale(giornale) { const totaleEl = document.getElementById('totale-cassa'); if (!giornale) { totaleEl.textContent = '0.00'; return; } const totale = giornale.movimenti.filter(m => m.pagamento === 'Contanti' || m.pagamento === 'Assegno').reduce((sum, m) => sum + m.importo, 0); totaleEl.textContent = totale.toFixed(2).replace('.', ','); },
-                
-                // --- EVENT LISTENER (Backup rimosso) ---
-                addEventListeners() { 
-                    document.getElementById('crea-nuovo-btn').addEventListener('click', () => this.creaNuovoGiornale()); 
-                    document.getElementById('movimento-form').addEventListener('submit', (e) => this.gestisciSubmit(e)); 
-                    document.getElementById('tabella-movimenti').addEventListener('click', (e) => this.gestisciClickTabella(e)); 
-                    document.getElementById('chiudi-giornale-btn').addEventListener('click', () => this.chiudiGiornale()); 
-                    document.getElementById('giornali-salvati').addEventListener('change', (e) => this.visualizzaGiornaleSalvato(e)); 
-                    document.getElementById('riapri-giornale-btn').addEventListener('click', () => this.riapriGiornale()); 
-                    document.getElementById('elimina-giornale-btn').addEventListener('click', () => this.eliminaGiornale()); 
-                    document.getElementById('stampa-btn').addEventListener('click', () => this.stampaGiornale()); 
-                    // Event listener per backup e ripristino rimossi
-                },
-
-                // --- AZIONI SUI MOVIMENTI (ora `async` e usano `updateDoc`) ---
-                async eliminaMovimento(movimentoId) {
-                    if (!confirm('Sei sicuro di voler eliminare questo movimento?')) return;
-                    const giornaleAperto = this.data.giornali.find(g => g.id === this.stato.giornaleApertoId);
-                    if (!giornaleAperto) return;
-                    
-                    // Filtra l'array e crea un nuovo array
-                    const nuoviMovimenti = giornaleAperto.movimenti.filter(m => m.id !== movimentoId);
-                    
-                    // Prepara il riferimento al documento
-                    const docRef = doc(this.stato.db, this.stato.collectionRef.path, giornaleAperto.id);
-                    
-                    try {
-                        // Aggiorna solo il campo 'movimenti' in Firestore
-                        await updateDoc(docRef, { movimenti: nuoviMovimenti });
-                        // onSnapshot() si occuperà di chiamare render()
-                    } catch (e) {
-                        console.error("Errore nell'eliminazione del movimento: ", e);
-                        // Mostra un errore all'utente (non con alert)
-                    }
-                },
-
-                gestisciClickTabella(e) {
-                    const target = e.target.closest('.icon-btn');
-                    if (!target) return;
-
-                    const id = parseInt(target.dataset.id);
-                    if (target.classList.contains('edit-btn')) {
-                        const giornaleAperto = this.data.giornali.find(g => g.id === this.stato.giornaleApertoId);
-                        const movimento = giornaleAperto.movimenti.find(m => m.id === id);
-                        if(movimento) {
-                            document.getElementById('ramo-polizza').value = movimento.ramo; 
-                            document.getElementById('numero-polizza').value = movimento.numeroPolizza; 
-                            document.getElementById('tipo-movimento').value = movimento.tipo; 
-                            document.getElementById('modalita-pagamento').value = movimento.pagamento; 
-                            document.getElementById('data-incasso').value = movimento.data; 
-                            document.getElementById('nome-cliente').value = movimento.cliente; 
-                            document.getElementById('importo').value = movimento.importo;
-                            this.stato.idInModifica = id;
-                            document.getElementById('submit-btn').textContent = 'Salva Modifiche';
-                            window.scrollTo(0, 0);
-                        }
-                    } else if (target.classList.contains('delete-btn')) {
-                        this.eliminaMovimento(id); // Questa ora è async
-                    }
-                },
-                
-                async gestisciSubmit(e) {
-                    e.preventDefault();
-                    const giornaleAperto = this.data.giornali.find(g => g.id === this.stato.giornaleApertoId);
-                    if (!giornaleAperto) return;
-
-                    const formData = { 
-                        id: this.stato.idInModifica || Date.now(), // Usa un timestamp come ID univoco
-                        ramo: document.getElementById('ramo-polizza').value, 
-                        numeroPolizza: document.getElementById('numero-polizza').value, 
-                        tipo: document.getElementById('tipo-movimento').value, 
-                        pagamento: document.getElementById('modalita-pagamento').value, 
-                        data: document.getElementById('data-incasso').value, 
-                        cliente: document.getElementById('nome-cliente').value, 
-                        importo: parseFloat(document.getElementById('importo').value) 
-                    };
-
-                    let nuoviMovimenti;
-                    if (this.stato.idInModifica) {
-                        // Aggiorna movimento esistente
-                        nuoviMovimenti = giornaleAperto.movimenti.map(m => m.id === this.stato.idInModifica ? formData : m);
-                    } else {
-                        // Aggiungi nuovo movimento
-                        nuoviMovimenti = [...giornaleAperto.movimenti, formData];
-                    }
-
-                    const docRef = doc(this.stato.db, this.stato.collectionRef.path, giornaleAperto.id);
-                    try {
-                        await updateDoc(docRef, { movimenti: nuoviMovimenti });
-                        // Resetta il form solo dopo il successo
-                        this.stato.idInModifica = null;
-                        document.getElementById('submit-btn').textContent = 'Aggiungi Movimento';
-                        e.target.reset();
-                        // onSnapshot() si occuperà di chiamare render()
-                    } catch (e) {
-                        console.error("Errore nell'aggiornamento dei movimenti: ", e);
-                    }
-                },
-                
-                // --- AZIONI SUI GIORNALI (ora `async` e usano `addDoc`, `updateDoc`, `deleteDoc`) ---
-                
-                stampaGiornale() { const giornale = this.data.giornali.find(g => g.id === this.stato.giornaleVisualizzatoId); if (!giornale) { alert("Per favore, seleziona un giornale da stampare."); return; } const headerContainer = document.getElementById('print-header-content'); const oggi = new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }); let headerHTML = `<h1>Giornale Cassa Allianz Gino</h1>`; if (giornale.stato === 'chiuso') { headerHTML += `<h2>Giornale N. ${giornale.numero || 'N/A'}/${giornale.anno || 'N/A'} - Chiuso il ${giornale.dataChiusura}</h2>`; } else { headerHTML += `<h2>Giornale Attuale (Aperto - non ancora numerato)</h2>`; } headerHTML += `<p>Stampato il: ${oggi}</p>`; headerContainer.innerHTML = headerHTML; const tableContainer = document.getElementById('print-table-content'); let tableHTML = `<table><thead><tr><th style="width:10%">Ramo</th><th style="width:13%">N. Polizza</th><th style="width:17%">Movimento</th><th style="width:13%">Pagamento</th><th style="width:12%">Data Incasso</th><th style="width:23%">Cliente</th><th style="width:12%">Importo</th></tr></thead><tbody>`; giornale.movimenti.forEach(m => { tableHTML += `<tr><td>${m.ramo}</td><td>${m.numeroPolizza}</td><td>${m.tipo}</td><td>${m.pagamento}</td><td>${new Date(m.data).toLocaleDateString('it-IT')}</td><td>${m.cliente}</td><td>${m.importo.toFixed(2).replace('.',',')} €</td></tr>`; }); tableHTML += `</tbody></table>`; tableContainer.innerHTML = tableHTML; const totalContainer = document.getElementById('print-total-content'); const totale = giornale.movimenti.filter(m => m.pagamento === 'Contanti' || m.pagamento === 'Assegno').reduce((sum, m) => sum + m.importo, 0); totalContainer.innerHTML = `Totale Cassa (Contanti e Assegni): € ${totale.toFixed(2).replace('.', ',')}`; window.print(); },
-                
-                async creaNuovoGiornale() { 
-                    if(this.stato.giornaleApertoId) { alert("Puoi creare un nuovo giornale solo dopo aver chiuso quello attuale."); return; } 
-                    const nuovoGiornale = { 
-                        // l'ID di Firebase viene usato come ID, non più Date.now()
-                        numero: null, 
-                        anno: null, 
-                        dataChiusura: null, 
-                        stato: 'aperto', 
-                        movimenti: [],
-                        dataCreazione: new Date().toISOString() // Utile per ordinare
-                    }; 
-                    try {
-                        // Aggiunge il documento a Firestore
-                        const docRef = await addDoc(this.stato.collectionRef, nuovoGiornale);
-                        // Imposta la vista sul nuovo giornale creato
-                        this.stato.giornaleVisualizzatoId = docRef.id;
-                        // onSnapshot() si occuperà di aggiornare i dati e chiamare render()
-                    } catch (e) {
-                        console.error("Errore nella creazione del giornale: ", e);
-                    }
-                },
-                
-                async chiudiGiornale() { 
-                    if (!confirm('Sei sicuro di voler chiudere il giornale cassa attuale?')) return; 
-                    
-                    const giornaleDaChiudere = this.data.giornali.find(g => g.id === this.stato.giornaleApertoId);
-                    if (!giornaleDaChiudere) return;
-                    
-                    const annoCorrente = new Date().getFullYear().toString();
-                    const giornaliDellAnno = this.data.giornali.filter(g => g.anno === annoCorrente && g.stato === 'chiuso');
-                    const maxNumero = giornaliDellAnno.reduce((max, g) => Math.max(max, g.numero || 0), 0);
-                    
-                    const datiAggiornati = {
-                        stato: 'chiuso', 
-                        dataChiusura: new Date().toLocaleDateString('it-IT'), 
-                        numero: maxNumero + 1,
-                        anno: annoCorrente
-                    };
-                    
-                    const docRef = doc(this.stato.db, this.stato.collectionRef.path, giornaleDaChiudere.id);
-                    try {
-                        await updateDoc(docRef, datiAggiornati);
-                        // Aggiorna lo stato locale per la navigazione
-                        this.stato.giornaleApertoId = null; 
-                        this.stato.giornaleVisualizzatoId = giornaleDaChiudere.id;
-                        // onSnapshot() si occuperà di chiamare render()
-                    } catch (e) {
-                        console.error("Errore nella chiusura del giornale: ", e);
-                    }
-                },
-
-                async riapriGiornale() { 
-                    if (this.stato.giornaleApertoId) { alert("Chiudi prima il giornale corrente per poter riaprire questo."); return; } 
-                    const giornaleDaRiaprire = this.data.giornali.find(g => g.id === this.stato.giornaleVisualizzatoId); 
-                    if (!giornaleDaRiaprire || giornaleDaRiaprire.stato !== 'chiuso') { alert("Seleziona un giornale chiuso da riaprire."); return; } 
-                    if (!confirm('Sei sicuro di voler riaprire questo giornale?')) return; 
-
-                    const datiAggiornati = {
-                        stato: 'aperto', 
-                        numero: null,
-                        anno: null,
-                        dataChiusura: null
-                    };
-
-                    const docRef = doc(this.stato.db, this.stato.collectionRef.path, giornaleDaRiaprire.id);
-                    try {
-                        await updateDoc(docRef, datiAggiornati);
-                        // onSnapshot() si occuperà di aggiornare lo stato e chiamare render()
-                    } catch (e) {
-                        console.error("Errore nella riapertura del giornale: ", e);
-                    }
-                },
-                
-                async eliminaGiornale() { 
-                    const giornaleDaEliminare = this.data.giornali.find(g => g.id === this.stato.giornaleVisualizzatoId); 
-                    if (!giornaleDaEliminare || giornaleDaEliminare.stato !== 'chiuso') { alert("Puoi eliminare solo un giornale chiuso."); return; } 
-                    if (!confirm(`Sei sicuro di voler eliminare definitivamente il "Giornale Cassa N. ${giornaleDaEliminare.numero || 'N/A'}/${giornaleDaEliminare.anno || 'N/A'}"? L'azione è irreversibile.`)) return; 
-                    
-                    const docRef = doc(this.stato.db, this.stato.collectionRef.path, giornaleDaEliminare.id);
-                    try {
-                        await deleteDoc(docRef);
-                        // Resetta la vista
-                        this.stato.giornaleVisualizzatoId = null;
-                        // onSnapshot() si occuperà di aggiornare i dati e chiamare render()
-                    } catch (e) {
-                        console.error("Errore nell'eliminazione del giornale: ", e);
-                    }
-                },
-                
-                visualizzaGiornaleSalvato(e) { 
-                    const id = e.target.value; // L'ID di Firestore è una stringa
-                    this.stato.giornaleVisualizzatoId = id || this.stato.giornaleApertoId || null; 
-                    this.render(); // Chiama render() direttamente per cambiare la vista
+                    this.render();
+                } catch (error) {
+                    console.error("Impossibile inizializzare l'app:", error);
+                    alert("ERRORE CRITICO: Impossibile caricare i dati dal database. Controlla la connessione e la configurazione di Firebase.");
                 }
-            };
+            },
+            
+            // MODIFICA: loadData() ora carica da Firestore
+            async loadData() {
+                console.log("Caricamento dati da Firestore...");
+                const snapshot = await giornaliCollection.orderBy("id", "desc").get();
+                
+                this.data.giornali = snapshot.docs.map(doc => ({
+                    firestoreId: doc.id, // Salviamo l'ID del documento Firestore
+                    ...doc.data()
+                }));
 
-            // Avvia l'applicazione
-            app.init();
-        });
+                const giornaleAperto = this.data.giornali.find(g => g.stato === 'aperto');
+                if (giornaleAperto) {
+                    this.stato.giornaleApertoId = giornaleAperto.id;
+                    this.stato.giornaleVisualizzatoId = giornaleAperto.id;
+                }
+                console.log("Dati caricati.", this.data);
+            },
+            
+            // RIMOSSA: saveData() non è più necessaria, salviamo direttamente su Firestore
+            // saveData() { ... }
+
+            render() { 
+                const giornaleVisualizzato = this.data.giornali.find(g => g.id === this.stato.giornaleVisualizzatoId); 
+                this.renderUI(giornaleVisualizzato); 
+                this.renderDropdown(); 
+                this.renderTabella(giornaleVisualizzato); 
+                this.renderTotale(giornaleVisualizzato); 
+            },
+            
+            renderUI(giornale) { 
+                const mainView = document.getElementById('main-view'), 
+                      noOpenJournalView = document.getElementById('no-open-journal-view'), 
+                      form = document.getElementById('movimento-form'), 
+                      openJournalActions = document.getElementById('open-journal-actions'), 
+                      closedJournalActions = document.getElementById('closed-journal-actions'), 
+                      titoloGiornale = document.getElementById('titolo-giornale'); 
+                
+                mainView.style.display = 'none'; 
+                noOpenJournalView.style.display = 'none'; 
+                form.style.display = 'none'; 
+                openJournalActions.style.display = 'none'; 
+                closedJournalActions.style.display = 'none'; 
+                
+                if (!this.stato.giornaleApertoId && !giornale) { 
+                    noOpenJournalView.style.display = 'flex'; 
+                } else { 
+                    mainView.style.display = 'block'; 
+                    if (giornale && giornale.stato === 'aperto') { 
+                        titoloGiornale.textContent = 'Giornale Cassa Attuale (Aperto)'; 
+                        form.style.display = 'grid'; 
+                        openJournalActions.style.display = 'flex'; 
+                    } else if (giornale) { 
+                        titoloGiornale.textContent = `Riepilogo Giornale N. ${giornale.numero || 'N/A'}/${giornale.anno || 'N/A'} (Chiuso il ${giornale.dataChiusura})`; 
+                        closedJournalActions.style.display = 'flex'; 
+                    } else {
+                        // Caso transitorio, ad es. dopo l'eliminazione
+                         noOpenJournalView.style.display = 'flex';
+                    }
+                } 
+            },
+            
+            renderDropdown() { 
+                const select = document.getElementById('giornali-salvati'); 
+                select.innerHTML = '<option value="">Seleziona per consultare...</option>'; 
+                this.data.giornali
+                    .filter(g => g.stato === 'chiuso')
+                    .sort((a, b) => (b.anno - a.anno) || (b.numero - a.numero))
+                    .forEach(g => { 
+                        const option = document.createElement('option'); 
+                        option.value = g.id; 
+                        option.textContent = `N. ${g.numero || 'N/A'}/${g.anno || 'N/A'} - Chiuso il ${g.dataChiusura}`; 
+                        select.appendChild(option); 
+                    }); 
+                // Assicura che l'ID sia una stringa per il confronto con 'select.value'
+                const visualizzatoIdStr = this.stato.giornaleVisualizzatoId ? this.stato.giornaleVisualizzatoId.toString() : "";
+                const apertoIdStr = this.stato.giornaleApertoId ? this.stato.giornaleApertoId.toString() : "";
+                
+                select.value = (visualizzatoIdStr !== apertoIdStr) ? visualizzatoIdStr : ""; 
+            },
+            
+            renderTabella(giornale) {
+                /* ... (Logica di renderTabella invariata) ... */
+                const tbody = document.getElementById('tabella-movimenti');
+                tbody.innerHTML = '';
+                if (!giornale) return;
+                giornale.movimenti.forEach(m => {
+                    const row = tbody.insertRow();
+                    const actionsHTML = giornale.stato === 'aperto'
+                        ? `<button class="icon-btn edit-btn" title="Modifica movimento" data-id="${m.id}">✏️</button>
+                           <button class="icon-btn delete-btn" title="Elimina movimento" data-id="${m.id}">❌</button>`
+                        : '—';
+                    
+                    row.innerHTML = `<td>${m.ramo}</td><td>${m.numeroPolizza}</td><td>${m.tipo}</td><td>${m.pagamento}</td><td>${new Date(m.data).toLocaleDateString('it-IT')}</td><td>${m.cliente}</td><td>${m.importo.toFixed(2).replace('.',',')} €</td><td class="no-print">${actionsHTML}</td>`;
+                });
+            },
+            
+            renderTotale(giornale) { 
+                /* ... (Logica di renderTotale invariata) ... */
+                const totaleEl = document.getElementById('totale-cassa'); 
+                if (!giornale) { totaleEl.textContent = '0.00'; return; } 
+                const totale = giornale.movimenti
+                    .filter(m => m.pagamento === 'Contanti' || m.pagamento === 'Assegno')
+                    .reduce((sum, m) => sum + m.importo, 0); 
+                totaleEl.textContent = totale.toFixed(2).replace('.', ','); 
+            },
+            
+            addEventListeners() { 
+                document.getElementById('crea-nuovo-btn').addEventListener('click', () => this.creaNuovoGiornale()); 
+                document.getElementById('movimento-form').addEventListener('submit', (e) => this.gestisciSubmit(e)); 
+                document.getElementById('tabella-movimenti').addEventListener('click', (e) => this.gestisciClickTabella(e)); 
+                document.getElementById('chiudi-giornale-btn').addEventListener('click', () => this.chiudiGiornale()); 
+                document.getElementById('giornali-salvati').addEventListener('change', (e) => this.visualizzaGiornaleSalvato(e)); 
+                document.getElementById('riapri-giornale-btn').addEventListener('click', () => this.riapriGiornale()); 
+                document.getElementById('elimina-giornale-btn').addEventListener('click', () => this.eliminaGiornale()); 
+                document.getElementById('stampa-btn').addEventListener('click', () => this.stampaGiornale()); 
+                // Event listener per Backup e Ripristino rimossi
+            },
+
+            // MODIFICA: La funzione ora è ASINCRONA e salva su Firestore
+            async eliminaMovimento(movimentoId) {
+                if (!confirm('Sei sicuro di voler eliminare questo movimento?')) return;
+                
+                const giornaleAperto = this.data.giornali.find(g => g.id === this.stato.giornaleApertoId);
+                if (!giornaleAperto) return;
+                
+                // 1. Aggiorna l'array locale
+                giornaleAperto.movimenti = giornaleAperto.movimenti.filter(m => m.id !== movimentoId);
+                
+                // 2. Salva l'array aggiornato su Firestore
+                try {
+                    await giornaliCollection.doc(giornaleAperto.firestoreId).update({
+                        movimenti: giornaleAperto.movimenti
+                    });
+                    // 3. Ricarica la vista
+                    this.render();
+                } catch (error) {
+                    console.error("Errore eliminazione movimento: ", error);
+                    alert("Errore durante l'eliminazione del movimento.");
+                    // Potenziale rollback (ricaricando i dati)
+                    location.reload(); 
+                }
+            },
+
+            gestisciClickTabella(e) {
+                /* ... (Logica di gestisciClickTabella invariata) ... */
+                const target = e.target.closest('.icon-btn');
+                if (!target) return;
+
+                const id = parseInt(target.dataset.id);
+                if (target.classList.contains('edit-btn')) {
+                    const giornaleAperto = this.data.giornali.find(g => g.id === this.stato.giornaleApertoId);
+                    const movimento = giornaleAperto.movimenti.find(m => m.id === id);
+                    document.getElementById('ramo-polizza').value = movimento.ramo; 
+                    document.getElementById('numero-polizza').value = movimento.numeroPolizza; 
+                    document.getElementById('tipo-movimento').value = movimento.tipo; 
+                    document.getElementById('modalita-pagamento').value = movimento.pagamento; 
+                    document.getElementById('data-incasso').value = movimento.data; 
+                    document.getElementById('nome-cliente').value = movimento.cliente; 
+                    document.getElementById('importo').value = movimento.importo;
+                    this.stato.idInModifica = id;
+                    document.getElementById('submit-btn').textContent = 'Salva Modifiche';
+                    window.scrollTo(0, 0);
+                } else if (target.classList.contains('delete-btn')) {
+                    this.eliminaMovimento(id);
+                }
+            },
+            
+            stampaGiornale() { 
+                /* ... (Logica di stampaGiornale invariata) ... */
+                const giornale = this.data.giornali.find(g => g.id === this.stato.giornaleVisualizzatoId); 
+                if (!giornale) { alert("Per favore, seleziona un giornale da stampare."); return; } 
+                const headerContainer = document.getElementById('print-header-content'); 
+                const oggi = new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }); 
+                let headerHTML = `<h1>Giornale Cassa Allianz Gino</h1>`; 
+                if (giornale.stato === 'chiuso') { 
+                    headerHTML += `<h2>Giornale N. ${giornale.numero || 'N/A'}/${giornale.anno || 'N/A'} - Chiuso il ${giornale.dataChiusura}</h2>`; 
+                } else { 
+                    headerHTML += `<h2>Giornale Attuale (Aperto - non ancora numerato)</h2>`; 
+                } 
+                headerHTML += `<p>Stampato il: ${oggi}</p>`; 
+                headerContainer.innerHTML = headerHTML; 
+                const tableContainer = document.getElementById('print-table-content'); 
+                let tableHTML = `<table><thead><tr><th style="width:10%">Ramo</th><th style="width:13%">N. Polizza</th><th style="width:17%">Movimento</th><th style="width:13%">Pagamento</th><th style="width:12%">Data Incasso</th><th style="width:23%">Cliente</th><th style="width:12%">Importo</th></tr></thead><tbody>`; 
+                giornale.movimenti.forEach(m => { tableHTML += `<tr><td>${m.ramo}</td><td>${m.numeroPolizza}</td><td>${m.tipo}</td><td>${m.pagamento}</td><td>${new Date(m.data).toLocaleDateString('it-IT')}</td><td>${m.cliente}</td><td>${m.importo.toFixed(2).replace('.',',')} €</td></tr>`; }); 
+                tableHTML += `</tbody></table>`; 
+                tableContainer.innerHTML = tableHTML; 
+                const totalContainer = document.getElementById('print-total-content'); 
+                const totale = giornale.movimenti.filter(m => m.pagamento === 'Contanti' || m.pagamento === 'Assegno').reduce((sum, m) => sum + m.importo, 0); 
+                totalContainer.innerHTML = `Totale Cassa (Contanti e Assegni): € ${totale.toFixed(2).replace('.', ',')}`; 
+                window.print(); 
+            },
+            
+            // MODIFICA: La funzione ora è ASINCRONA e crea un documento su Firestore
+            async creaNuovoGiornale() {
+                if(this.stato.giornaleApertoId) { 
+                    alert("Puoi creare un nuovo giornale solo dopo aver chiuso quello attuale."); 
+                    return; 
+                }
+                
+                const nuovoGiornale = { 
+                    id: Date.now(), // Usiamo ancora un ID univoco locale
+                    numero: null, 
+                    anno: null, 
+                    dataChiusura: null, 
+                    stato: 'aperto', 
+                    movimenti: [] 
+                }; 
+                
+                try {
+                    // 1. Salva il nuovo giornale su Firestore
+                    const docRef = await giornaliCollection.add(nuovoGiornale);
+                    
+                    // 2. Aggiorna l'oggetto locale con l'ID di Firestore
+                    nuovoGiornale.firestoreId = docRef.id;
+                    
+                    // 3. Aggiorna la cache locale e lo stato
+                    this.data.giornali.unshift(nuovoGiornale); // Aggiungi in cima
+                    this.stato.giornaleApertoId = nuovoGiornale.id; 
+                    this.stato.giornaleVisualizzatoId = nuovoGiornale.id; 
+                    
+                    // 4. Ricarica la vista
+                    this.render();
+                } catch (error) {
+                    console.error("Errore creazione nuovo giornale: ", error);
+                    alert("Errore durante la creazione del nuovo giornale.");
+                }
+            },
+            
+            // MODIFICA: La funzione ora è ASINCRONA e aggiorna un documento su Firestore
+            async chiudiGiornale() { 
+                if (!confirm('Sei sicuro di voler chiudere il giornale cassa attuale?')) return; 
+                
+                const giornaleDaChiudere = this.data.giornali.find(g => g.id === this.stato.giornaleApertoId);
+                if (!giornaleDaChiudere) return;
+
+                const annoCorrente = new Date().getFullYear().toString();
+                
+                const giornaliDellAnno = this.data.giornali.filter(g => g.anno === annoCorrente && g.stato === 'chiuso');
+                const maxNumero = giornaliDellAnno.reduce((max, g) => Math.max(max, g.numero || 0), 0);
+                
+                // 1. Prepara i dati da aggiornare
+                const aggiornamenti = {
+                    stato: 'chiuso',
+                    dataChiusura: new Date().toLocaleDateString('it-IT'),
+                    numero: maxNumero + 1,
+                    anno: annoCorrente
+                };
+
+                try {
+                    // 2. Aggiorna il documento su Firestore
+                    await giornaliCollection.doc(giornaleDaChiudere.firestoreId).update(aggiornamenti);
+                    
+                    // 3. Aggiorna la cache locale
+                    Object.assign(giornaleDaChiudere, aggiornamenti);
+                    
+                    // 4. Aggiorna lo stato
+                    this.stato.giornaleApertoId = null; 
+                    this.stato.giornaleVisualizzatoId = giornaleDaChiudere.id; 
+                    
+                    // 5. Ricarica la vista
+                    this.render(); 
+                } catch (error) {
+                    console.error("Errore chiusura giornale: ", error);
+                    alert("Errore durante la chiusura del giornale.");
+                }
+            },
+
+            // MODIFICA: La funzione ora è ASINCRONA e aggiorna un documento su Firestore
+            async riapriGiornale() { 
+                if (this.stato.giornaleApertoId) { 
+                    alert("Chiudi prima il giornale corrente per poter riaprire questo."); 
+                    return; 
+                } 
+                const giornaleDaRiaprire = this.data.giornali.find(g => g.id === this.stato.giornaleVisualizzatoId); 
+                if (!giornaleDaRiaprire || giornaleDaRiaprire.stato !== 'chiuso') { 
+                    alert("Seleziona un giornale chiuso da riaprire."); 
+                    return; 
+                } 
+                if (!confirm('Sei sicuro di voler riaprire questo giornale?')) return; 
+                
+                // 1. Prepara i dati da aggiornare
+                const aggiornamenti = {
+                    stato: 'aperto',
+                    numero: null,
+                    anno: null,
+                    dataChiusura: null
+                };
+
+                try {
+                    // 2. Aggiorna il documento su Firestore
+                    await giornaliCollection.doc(giornaleDaRiaprire.firestoreId).update(aggiornamenti);
+                    
+                    // 3. Aggiorna la cache locale
+                    Object.assign(giornaleDaRiaprire, aggiornamenti);
+                    
+                    // 4. Aggiorna lo stato
+                    this.stato.giornaleApertoId = giornaleDaRiaprire.id; 
+                    this.stato.giornaleVisualizzatoId = giornaleDaRiaprire.id; 
+                    
+                    // 5. Ricarica la vista
+                    this.render(); 
+                } catch (error) {
+                    console.error("Errore riapertura giornale: ", error);
+                    alert("Errore durante la riapertura del giornale.");
+                }
+            },
+            
+            // MODIFICA: La funzione ora è ASINCRONA ed elimina un documento da Firestore
+            async eliminaGiornale() { 
+                const giornaleDaEliminare = this.data.giornali.find(g => g.id === this.stato.giornaleVisualizzatoId); 
+                if (!giornaleDaEliminare || giornaleDaEliminare.stato !== 'chiuso') { 
+                    alert("Puoi eliminare solo un giornale chiuso."); 
+                    return; 
+                } 
+                if (!confirm(`Sei sicuro di voler eliminare definitivamente il "Giornale Cassa N. ${giornaleDaEliminare.numero || 'N/A'}/${giornaleDaEliminare.anno || 'N/A'}"? L'azione è irreversibile.`)) return; 
+                
+                try {
+                    // 1. Elimina il documento da Firestore
+                    await giornaliCollection.doc(giornaleDaEliminare.firestoreId).delete();
+                    
+                    // 2. Elimina dalla cache locale
+                    this.data.giornali = this.data.giornali.filter(g => g.id !== giornaleDaEliminare.id); 
+                    
+                    // 3. Aggiorna lo stato
+                    this.stato.giornaleVisualizzatoId = null; 
+                    
+                    // 4. Ricarica la vista
+                    this.render(); 
+                } catch (error) {
+                    console.error("Errore eliminazione giornale: ", error);
+                    alert("Errore durante l'eliminazione del giornale.");
+                }
+            },
+            
+            visualizzaGiornaleSalvato(e) { 
+                const id = parseInt(e.target.value); 
+                this.stato.giornaleVisualizzatoId = id || this.stato.giornaleApertoId || null; 
+                this.render(); 
+            },
+            
+            // MODIFICA: La funzione ora è ASINCRONA e aggiorna l'array 'movimenti' su Firestore
+            async gestisciSubmit(e) { 
+                e.preventDefault(); 
+                const giornaleAperto = this.data.giornali.find(g => g.id === this.stato.giornaleApertoId); 
+                if (!giornaleAperto) return; 
+                
+                const formData = { 
+                    id: this.stato.idInModifica || Date.now(), 
+                    ramo: document.getElementById('ramo-polizza').value, 
+                    numeroPolizza: document.getElementById('numero-polizza').value, 
+                    tipo: document.getElementById('tipo-movimento').value, 
+                    pagamento: document.getElementById('modalita-pagamento').value, 
+                    data: document.getElementById('data-incasso').value, 
+                    cliente: document.getElementById('nome-cliente').value, 
+                    importo: parseFloat(document.getElementById('importo').value) 
+                }; 
+                
+                // 1. Aggiorna l'array locale
+                if (this.stato.idInModifica) { 
+                    const index = giornaleAperto.movimenti.findIndex(m => m.id === this.stato.idInModifica); 
+                    giornaleAperto.movimenti[index] = formData; 
+                    this.stato.idInModifica = null; 
+                    document.getElementById('submit-btn').textContent = 'Aggiungi Movimento'; 
+                } else { 
+                    giornaleAperto.movimenti.push(formData); 
+                } 
+                
+                // 2. Salva l'intero array 'movimenti' aggiornato su Firestore
+                try {
+                    await giornaliCollection.doc(giornaleAperto.firestoreId).update({
+                        movimenti: giornaleAperto.movimenti
+                    });
+                    
+                    // 3. Ricarica la vista e resetta il form
+                    this.render(); 
+                    e.target.reset();
+                } catch (error) {
+                    console.error("Errore salvataggio movimento: ", error);
+                    alert("Errore durante il salvataggio del movimento.");
+                }
+            }
+            
+            // FUNZIONI RIMOSSE: backupDati(), ripristinaDati()
+        };
+
+        app.init();
+    });
     </script>
 </body>
 </html>
