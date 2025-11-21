@@ -44,8 +44,8 @@
         /* Stile specifico per la checkbox per allinearla meglio */
         .form-group-checkbox {
             display: flex; align-items: center; gap: 10px;
-            grid-column: span 1; /* Assicura che occupi una sola colonna nella griglia */
-            padding-top: 10px; /* Spazio per allineare con altri input */
+            grid-column: span 1; 
+            padding-top: 10px; 
         }
         .form-group-checkbox input[type="checkbox"] {
             width: 20px; height: 20px; margin: 0;
@@ -82,8 +82,8 @@
         }
         .icon-btn:hover { background-color: #e9ecef; }
         
-        /* Modifica per 'no-print' */
-        .no-print { /* Nasconde la colonna azioni nella visualizzazione su schermo */ }
+        /* Nasconde la colonna azioni e Già Dati nell'interfaccia principale */
+        .no-print { /* Utilizzato per nascondere azioni e Già Dati quando non si stampa */ }
 
         @media print {
             @page { size: A4 portrait; margin: 2cm; }
@@ -91,7 +91,7 @@
             body > *:not(.print-only) { display: none !important; }
             .print-only { display: block; }
 
-            /* Nasconde la colonna azioni e i pulsanti nella stampa */
+            /* Nasconde la colonna azioni nella stampa */
             .no-print { display: none !important; }
 
             #print-header-content h1 { font-size: 18pt; margin-bottom: 5px; text-align: center; }
@@ -297,7 +297,7 @@
                 select.value = (visualizzatoIdStr !== apertoIdStr) ? visualizzatoIdStr : ""; 
             },
             
-            // MODIFICATO: renderTabella (aggiunta colonna Già Dati e rimpiazzato Importo Titolo)
+            // MODIFICATO: renderTabella (Aggiunta colonna Già Dati)
             renderTabella(giornale) {
                 const tbody = document.getElementById('tabella-movimenti');
                 tbody.innerHTML = '';
@@ -312,7 +312,7 @@
                     
                     const decorrenzaStr = m.decorrenza ? new Date(m.decorrenza).toLocaleDateString('it-IT') : '—';
                     const dataIncassoStr = m.data ? new Date(m.data).toLocaleDateString('it-IT') : '—';
-                    // NUOVO: Visualizzazione stato Soldi Già Dati
+                    // NUOVO: Visualizzazione stato Soldi Già Dati (Visibile su schermo)
                     const soldiDatiStr = m.soldiDati ? '✅' : '❌'; 
 
                     row.innerHTML = `<td>${m.ramo}</td>
@@ -322,18 +322,18 @@
                                      <td>${decorrenzaStr}</td>
                                      <td>${dataIncassoStr}</td>
                                      <td>${m.cliente}</td>
-                                     <td class="no-print">${soldiDatiStr}</td>
+                                     <td class="no-print" style="text-align: center;">${soldiDatiStr}</td>
                                      <td>${m.importo.toFixed(2).replace('.',',')} €</td>
                                      <td class="no-print">${actionsHTML}</td>`;
                 });
             },
             
-            // MODIFICATO: renderTotale (esclude i movimenti con 'soldiDati' a true)
+            // MODIFICATO: renderTotale (Esclude movimenti con 'soldiDati' a true)
             renderTotale(giornale) { 
                 const totaleEl = document.getElementById('totale-cassa'); 
                 if (!giornale) { totaleEl.textContent = '0.00'; return; } 
                 const totale = giornale.movimenti
-                    .filter(m => (m.pagamento === 'Contanti' || m.pagamento === 'Assegno') && !m.soldiDati) // ESCLUSIONE
+                    .filter(m => (m.pagamento === 'Contanti' || m.pagamento === 'Assegno') && !m.soldiDati) // ESCLUSIONE SE GIÀ DATI
                     .reduce((sum, m) => sum + m.importo, 0); 
                 totaleEl.textContent = totale.toFixed(2).replace('.', ','); 
             },
@@ -386,7 +386,7 @@
                     document.getElementById('data-incasso').value = movimento.data; 
                     document.getElementById('nome-cliente').value = movimento.cliente; 
                     document.getElementById('importo').value = movimento.importo;
-                    document.getElementById('soldi-dati').checked = movimento.soldiDati || false; // NUOVO
+                    document.getElementById('soldi-dati').checked = movimento.soldiDati || false; // NUOVO: Carica stato checkbox
                     this.stato.idInModifica = id;
                     document.getElementById('submit-btn').textContent = 'Salva Modifiche';
                     window.scrollTo(0, 0);
@@ -412,7 +412,7 @@
                 
                 const tableContainer = document.getElementById('print-table-content'); 
                 
-                // Intestazione tabella di stampa aggiornata
+                // Intestazione tabella di stampa
                 let tableHTML = `<table><thead><tr>
                                      <th>Ramo</th>
                                      <th>N. Polizza</th>
@@ -425,11 +425,11 @@
                                      <th>Importo Totale</th>
                                      <th>Provvigioni (€)</th> </tr></thead><tbody>`; 
                 
-                // Contenuto tabella di stampa aggiornato
+                // Contenuto tabella di stampa
                 giornale.movimenti.forEach(m => { 
                     const decorrenzaStr = m.decorrenza ? new Date(m.decorrenza).toLocaleDateString('it-IT') : '—';
                     const dataIncassoStr = m.data ? new Date(m.data).toLocaleDateString('it-IT') : '—';
-                    // NUOVO: Stato Soldi Già Dati per la stampa
+                    // Stato Soldi Già Dati per la stampa
                     const soldiDatiPrint = m.soldiDati ? 'Si' : 'No'; 
 
                     tableHTML += `<tr>
@@ -459,7 +459,130 @@
                 window.print(); 
             },
             
-            // ... (creaNuovoGiornale, chiudiGiornale, riapriGiornale, eliminaGiornale, visualizzaGiornaleSalvato invariati) ...
+            async creaNuovoGiornale() {
+                if(this.stato.giornaleApertoId) { 
+                    alert("Puoi creare un nuovo giornale solo dopo aver chiuso quello attuale."); 
+                    return; 
+                }
+                
+                const nuovoGiornale = { 
+                    id: Date.now(), 
+                    numero: null, 
+                    anno: null, 
+                    dataChiusura: null, 
+                    stato: 'aperto', 
+                    movimenti: [] 
+                }; 
+                
+                try {
+                    const docRef = await giornaliCollection.add(nuovoGiornale);
+                    nuovoGiornale.firestoreId = docRef.id;
+                    this.data.giornali.unshift(nuovoGiornale);
+                    this.stato.giornaleApertoId = nuovoGiornale.id; 
+                    this.stato.giornaleVisualizzatoId = nuovoGiornale.id; 
+                    this.render();
+                } catch (error) {
+                    console.error("Errore creazione nuovo giornale: ", error);
+                    alert("Errore durante la creazione del nuovo giornale.");
+                }
+            },
+            
+            // CORRETTO: chiudiGiornale (Logica aggiornata per assegnazione numero progressivo e controllo stato)
+            async chiudiGiornale() { 
+                if (!confirm('Sei sicuro di voler chiudere il giornale cassa attuale? Questa operazione assegnerà il numero progressivo.')) return; 
+                
+                const giornaleDaChiudere = this.data.giornali.find(g => g.id === this.stato.giornaleApertoId);
+                
+                if (!giornaleDaChiudere || giornaleDaChiudere.stato !== 'aperto') {
+                    alert("Errore: Nessun giornale aperto da chiudere.");
+                    return;
+                }
+
+                const annoCorrente = new Date().getFullYear().toString();
+                
+                // Trova l'ultimo numero usato per l'anno corrente tra i giornali chiusi
+                const giornaliDellAnno = this.data.giornali.filter(g => g.anno === annoCorrente && g.stato === 'chiuso');
+                const maxNumero = giornaliDellAnno.reduce((max, g) => Math.max(max, g.numero || 0), 0);
+                
+                const aggiornamenti = {
+                    stato: 'chiuso',
+                    dataChiusura: new Date().toLocaleDateString('it-IT'),
+                    numero: maxNumero + 1, // Assegna il prossimo numero progressivo
+                    anno: annoCorrente
+                };
+
+                try {
+                    // Aggiorna il documento su Firestore
+                    await giornaliCollection.doc(giornaleDaChiudere.firestoreId).update(aggiornamenti);
+                    
+                    // Aggiorna lo stato locale
+                    Object.assign(giornaleDaChiudere, aggiornamenti);
+                    this.stato.giornaleApertoId = null; 
+                    this.stato.giornaleVisualizzatoId = giornaleDaChiudere.id; 
+                    
+                    this.render(); 
+                    alert(`Giornale N. ${aggiornamenti.numero}/${aggiornamenti.anno} chiuso con successo!`);
+                } catch (error) {
+                    console.error("Errore chiusura giornale: ", error);
+                    alert("Errore durante la chiusura del giornale. Controlla la console per i dettagli.");
+                }
+            },
+
+            async riapriGiornale() { 
+                if (this.stato.giornaleApertoId) { 
+                    alert("Chiudi prima il giornale corrente per poter riaprire questo."); 
+                    return; 
+                } 
+                const giornaleDaRiaprire = this.data.giornali.find(g => g.id === this.stato.giornaleVisualizzatoId); 
+                if (!giornaleDaRiaprire || giornaleDaRiaprire.stato !== 'chiuso') { 
+                    alert("Seleziona un giornale chiuso da riaprire."); 
+                    return; 
+                } 
+                if (!confirm('Sei sicuro di voler riaprire questo giornale?')) return; 
+                
+                const aggiornamenti = {
+                    stato: 'aperto',
+                    numero: null,
+                    anno: null,
+                    dataChiusura: null
+                };
+
+                try {
+                    await giornaliCollection.doc(giornaleDaRiaprire.firestoreId).update(aggiornamenti);
+                    Object.assign(giornaleDaRiaprire, aggiornamenti);
+                    this.stato.giornaleApertoId = giornaleDaRiaprire.id; 
+                    this.stato.giornaleVisualizzatoId = giornaleDaRiaprire.id; 
+                    this.render(); 
+                } catch (error) {
+                    console.error("Errore riapertura giornale: ", error);
+                    alert("Errore durante la riapertura del giornale.");
+                }
+            },
+            
+            async eliminaGiornale() { 
+                const giornaleDaEliminare = this.data.giornali.find(g => g.id === this.stato.giornaleVisualizzatoId); 
+                if (!giornaleDaEliminare || giornaleDaEliminare.stato !== 'chiuso') { 
+                    alert("Puoi eliminare solo un giornale chiuso."); 
+                    return; 
+                } 
+                if (!confirm(`Sei sicuro di voler eliminare definitivamente il "Giornale Cassa N. ${giornaleDaEliminare.numero || 'N/A'}/${giornaleDaEliminare.anno || 'N/A'}"? L'azione è irreversibile.`)) return; 
+                
+                try {
+                    await giornaliCollection.doc(giornaleDaEliminare.firestoreId).delete();
+                    this.data.giornali = this.data.giornali.filter(g => g.id !== giornaleDaEliminare.id); 
+                    this.stato.giornaleVisualizzatoId = null; 
+                    this.render(); 
+                } catch (error) {
+                    console.error("Errore eliminazione giornale: ", error);
+                    alert("Errore durante l'eliminazione del giornale.");
+                }
+            },
+            
+            visualizzaGiornaleSalvato(e) { 
+                const id = parseInt(e.target.value); 
+                this.stato.giornaleVisualizzatoId = id || this.stato.giornaleApertoId || null; 
+                this.render(); 
+            },
             
             // MODIFICATO: gestisciSubmit (Salva anche lo stato di 'soldi-dati')
             async gestisciSubmit(e) { 
@@ -478,7 +601,7 @@
                     data: document.getElementById('data-incasso').value, 
                     cliente: document.getElementById('nome-cliente').value, 
                     importo: parseFloat(document.getElementById('importo').value),
-                    soldiDati: document.getElementById('soldi-dati').checked // NUOVO: Aggiungi stato checkbox
+                    soldiDati: document.getElementById('soldi-dati').checked // AGGIUNTO: Aggiungi stato checkbox
                 }; 
                 
                 if (this.stato.idInModifica) { 
